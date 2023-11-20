@@ -8,7 +8,7 @@ cekilisDuration,Sound,gameDuration,sn,harekethizi,dogru,pas,puan : Integer;
 QMemList : TclJSonQuery;
 myDeviceManager : TclDeviceManager;
 WinMQTT,MobileMQTT : TclMQTT;
-MyWord : String;
+MyWord,winUserGUID : String;
 myGameEngine : TclGameEngine;
 SoundisTrue : Boolean;
 DeviceMotionSensor : TClMotionSensor;
@@ -44,7 +44,7 @@ void MemberListMix;
   if (CekilisTimer.Enabled == False)
   {
     QMemList = Clomosy.DBCloudQueryWith(ftMembers,'','ISNULL(PMembers.Rec_Deleted,0)=0 ORDER BY NEWID()');     
-    QMemList.Filter = 'Member_GUID <> '+QuotedStr('M961J83TO5');  
+    QMemList.Filter = 'Member_GUID <> '+QuotedStr(winUserGUID);  
     QMemList.Filtered = True;                                         
   }                                                 //EXE NİN GUID SİNİ BURAYA YAZINIZ.
   cekilisTimer.Enabled = True;
@@ -439,6 +439,8 @@ void scoreTablePnlScreen
   {
     WinForm=TclForm.Create(self);
     WinForm.SetFormColor('#ad1c0b','#fd5a3b',clGVertical);
+    
+    winUserGUID = Clomosy.AppUserGUID;
     
     dataStringList = Clomosy.StringListNew;
     sortList = Clomosy.StringListNew;
