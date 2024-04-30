@@ -1,14 +1,15 @@
 var
 WinForm : TclForm;
+mobilePanel : TclProPanel;
 MobileForm : TclGameform;
 baslaBtn,bitirBtn : TClProButton;
-cekilisTimer,gameTimer,jiroskopTimer : TClTimer;
+cekilisTimer,gameTimer,jiroskopTimer,sendTimer,resultTimer : TClTimer;
 drawLbl,wordLbl,timerLbl,dogruLbl,pasLbl,puanLbl : TClProLabel;
-cekilisDuration,Sound,gameDuration,sn,harekethizi,dogru,pas,puan : Integer;
-QMemList : TclJSonQuery;
+cekilisDuration,Sound,CorrectSound,WrongSound,gameDuration,sn,harekethizi,dogru,pas,puan,counterTimerSend,resultTimerSend : Integer;
+QMemList,QMembers : TclJSonQuery;
 myDeviceManager : TclDeviceManager;
 WinMQTT,MobileMQTT : TclMQTT;
-MyWord,winUserGUID : String;
+MyWord,winUserGUID,adminGUID : String;
 myGameEngine : TclGameEngine;
 SoundisTrue : Boolean;
 DeviceMotionSensor : TClMotionSensor;
@@ -16,191 +17,254 @@ konum : TclProImage;
 testLabelMin_X,testLabelMax_X : Single;
 testLabelMin_Y,testLabelMax_Y : Single;
 dogruImg,pasImg,anlatbakalimImg : TClProImage;
-
-
-
-    ScoreTblListview : TClProListView;
-    ScoreTblDesignerPanel : TClProListViewDesignerPanel;
-    PnlScoreTbl,PnlMain,PnlCekilis : TclProPanel;
-    LblScoreTitleName,UserName,UserScore,LblCekilisCikanIsim : TClProLabel;
-    BtnCekilisYap, BtnSifirla, SortNumber : TclProButton;
-    LblMainTitle : TclProImage;
-  
-    dataStringList : TclStringList;
-    sortList:TclStringList;
-    nameArr : TclArrayString;
-    scoreArr : TclArrayInteger;
-    qryPlayersData:TCLJSONQuery;
-    jsonStr:string;
+ScoreTblListview : TClProListView;
+ScoreTblDesignerPanel : TClProListViewDesignerPanel;
+PnlScoreTbl,PnlMain,PnlCekilis : TclProPanel;
+LblScoreTitleName,UserName,UserScore,LblCekilisCikanIsim : TClProLabel;
+BtnCekilisYap, BtnSifirla, SortNumber : TclProButton;
+LblMainTitle : TclProImage;
+dataStringList : TclStringList;
+sortList:TclStringList;
+nameArr : TclArrayString;
+scoreArr : TclArrayInteger;
+qryPlayersData:TCLJSONQuery;
+jsonStr,TempGUID,TempResult:string;
+memberNameFound : String;
+puanLayout,baslaLayout,wordLayout  : TclLayout;
+wordPanel,puanPanel : TclProPanel;
 
 procedure ProcSound;                                 //SES ÇALAN PROSEDÜR
+  begin
+    MobileForm.PlayGameSound(Sound);
+  end;
+  
+procedure MobileMQTTStatusChanged;
 begin
-  MobileForm.PlayGameSound(Sound);
+  if Not MobileMQTT.Connected then
+  begin
+    try
+       MobileMQTT.Connect;
+    except
+      ShowMessage('İnternet bağlantınızı kontrol ediniz... ' + 'Exception Class: ' + LastExceptionClassName + ' Exception Message: ' + LastExceptionMessage);
+    end;
+  end;
+end;  
+
+procedure WinMQTTStatusChanged;
+begin
+  if Not WinMQTT.Connected then
+  begin
+    try
+       WinMQTT.Connect;
+    except
+      ShowMessage('İnternet bağlantınızı kontrol ediniz... ' + 'Exception Class: ' + LastExceptionClassName + ' Exception Message: ' + LastExceptionMessage);
+    end;
+  end;
 end;
 
 procedure MemberListMix;
-begin
-  cekilisDuration:=0;
-  if CekilisTimer.Enabled = False then
   begin
-    QMemList := Clomosy.DBCloudQueryWith(ftMembers,'','ISNULL(PMembers.Rec_Deleted,0)=0 ORDER BY NEWID()');     
-    QMemList.Filter := 'Member_GUID <> '+QuotedStr(winUserGUID);  
-    QMemList.Filtered := True;                                         
-  end;                                                 //EXE NİN GUID SİNİ BURAYA YAZINIZ.
-  cekilisTimer.Enabled := True;
-  LblCekilisCikanIsim.Caption := '';
-end;
-procedure ProcCekilis;                                         //ÇEKİLİŞ PROSEDÜRÜ
-begin
-  Clomosy.ProcessMessages;
-  BtnCekilisYap.Enabled:=false;
-  if cekilisDuration=5 then
-  begin
-    BtnCekilisYap.Enabled:=True;
-    cekilisTimer.Enabled:=False;
-    WinMQTT.Send(QMemList.FieldByName('Member_GUID').AsString);
+    cekilisDuration := 0;
+    counterTimerSend := 0;
+    if CekilisTimer.Enabled = False then
+    begin
+      try
+        QMemList := Clomosy.DBCloudQueryWith(ftMembers,'','ISNULL(PMembers.Rec_Deleted,0)=0 AND PMember_Profile <> 1 ORDER BY NEWID()');     
+        QMemList.Filter := 'Member_GUID <> '+ QuotedStr(winUserGUID);
+        QMemList.Filtered := True;
+      except
+        ShowMessage('1 ' + LastExceptionClassName + #13 + LastExceptionMessage);
+      end;
+    end;                                                 //EXE NİN GUID SİNİ BURAYA YAZINIZ.
+    cekilisTimer.Enabled := True;
+    //LblCekilisCikanIsim.Caption := '';
   end;
-  
-  LblCekilisCikanIsim.Caption := QMemList.FieldByName('Member_Name').AsString;
-  QMemList.Next;  
-  
-  if QMemList.EOF then
-  begin
-    QMemList.First;
-  end
-  Inc(cekilisDuration);
-end;
 
+procedure SendOnTimer;
+  begin
+    if Not WinMQTT.Connected then
+    begin
+      try
+         WinMQTT.Connect;
+      except
+        ShowMessage('İnternet bağlantınızı kontrol ediniz... ' + 'Exception Class: ' + LastExceptionClassName + ' Exception Message: ' + LastExceptionMessage);
+      end;
+    end;
+    if counterTimerSend <= 10 then
+      begin
+        try
+          WinMQTT.Send(QMemList.FieldByName('Member_GUID').AsString);
+          Inc(counterTimerSend); 
+        except
+          ShowMessage('2 ' + LastExceptionClassName + #13 + LastExceptionMessage);
+      end;
+      end;
+    if counterTimerSend > 10 then
+        sendTimer.Enabled := False;
+  end;
+procedure ProcCekilis;                                         //ÇEKİLİŞ PROSEDÜRÜ
+  begin
+    try
+      Clomosy.ProcessMessages;
+      BtnCekilisYap.Enabled:=false;
+      if cekilisDuration = 5 then
+      begin
+        BtnCekilisYap.Enabled:=True;
+        cekilisTimer.Enabled:=False;
+        sendTimer.Enabled := True;
+      end;
+      QMemList.Next;  
+      if QMemList.EOF then
+        QMemList.First;
+      
+      Inc(cekilisDuration);
+      LblCekilisCikanIsim.Caption := QMemList.FieldByName('Member_Name').AsString;
+    except
+      BtnCekilisYap.Enabled:=True;
+      cekilisTimer.Enabled := False;
+      sendTimer.Enabled := False;
+      ShowMessage('3 ' + LastExceptionClassName + #13 + LastExceptionMessage);
+    end;
+  end;
 procedure refreshScoreTable;
 begin
     try
       qryPlayersData := TCLJSONQuery.Create(nil);
       qryPlayersData := Clomosy.ClDataSetFromJSON(jsonStr);
       with qryPlayersData do
-       begin
+      begin
        ScoreTblListview.clLoadProListViewDataFromDataset(qryPlayersData);
-       end;
+      end;
     except
       ShowMessage('Exception Class: '+LastExceptionClassName+' Exception Message: '+LastExceptionMessage);
     end;
 end;
-
 procedure kazananClick
-var
-  i,j,tempIScore,TempScore, tempJScore :Integer;
-  tempI,tempJ,TempName,tempIName, tempJName : String;
-  ListI, ListJ:TclStringList;
-begin
-  ListI := Clomosy.StringListNew;
-  ListI.Delimiter := '=';
-  
-  ListJ := Clomosy.StringListNew;
-  ListJ.Delimiter := '=';
-   
-  nameArr.RemoveAll;
-  scoreArr.RemoveAll;
-  
-  //DİZİLERE İSİM VE PUANLAR TUTULDU.
-  for i := 0 to dataStringList.Count-1 do
+  var
+    i,j,tempIScore,TempScore, tempJScore :Integer;
+    tempI,tempJ,TempName,tempIName, tempJName : String;
+    ListI, ListJ:TclStringList;
   begin
-      tempI := Clomosy.StringListItemString(dataStringList,i);
-      ListI.DelimitedText := tempI;
+    ListI := Clomosy.StringListNew;
+    ListI.Delimiter := '=';
     
-      tempIScore := StrToInt(Clomosy.StringListItemString(ListI,1));
-      tempIName := Clomosy.StringListItemString(ListI,0);
-      
-      nameArr.Add(tempIName);
-      scoreArr.Add(tempIScore);
-  end;
-  
-  //SIRALAMAAA
-  for i := 0 to scoreArr.Count-1 do
-  begin
-    for j := i+1 to scoreArr.Count-1 do
+    ListJ := Clomosy.StringListNew;
+    ListJ.Delimiter := '=';
+     
+    nameArr.RemoveAll;
+    scoreArr.RemoveAll;
+    
+    //DİZİLERE İSİM VE PUANLAR TUTULDU.
+    for i := 0 to dataStringList.Count-1 do
     begin
-      //ShowMessage(scoreArr.GetItem(i));
-      //ShowMessage(scoreArr.GetItem(j));
+        tempI := Clomosy.StringListItemString(dataStringList,i);
+        ListI.DelimitedText := tempI;
       
-      if scoreArr.GetItem(i) < scoreArr.GetItem(j) then
-      begin
-        TempScore := scoreArr.GetItem(i);
-        scoreArr.SetItem(i,scoreArr.GetItem(j));
-        scoreArr.SetItem(j,TempScore);
+        tempIScore := StrToInt(Clomosy.StringListItemString(ListI,1));
+        tempIName := Clomosy.StringListItemString(ListI,0);
         
-        TempName := nameArr.GetItem(i);
-        nameArr.SetItem(i,nameArr.GetItem(j));
-        nameArr.SetItem(j,TempName);
+        nameArr.Add(tempIName);
+        scoreArr.Add(tempIScore);
+    end;
+    //SIRALAMA
+    for i := 0 to scoreArr.Count-1 do
+    begin
+      for j := i+1 to scoreArr.Count-1 do
+      begin
+        if scoreArr.GetItem(i) < scoreArr.GetItem(j) then
+        begin
+          TempScore := scoreArr.GetItem(i);
+          scoreArr.SetItem(i,scoreArr.GetItem(j));
+          scoreArr.SetItem(j,TempScore);
+          
+          TempName := nameArr.GetItem(i);
+          nameArr.SetItem(i,nameArr.GetItem(j));
+          nameArr.SetItem(j,TempName);
+        end;
       end;
     end;
-  end;
-  //scoreMemo.Lines.Clear;
-  dataStringList.Clear;
-  jsonStr := '';
-  jsonStr := '[';
-  for j:= 0 to nameArr.Count-1 do
-  begin
-    dataStringList.Add(nameArr.GetItem(j)+' = '+IntToStr(scoreArr.GetItem(j))); //'+QuotedStr('https://clomosy.com/demos/explain_iron.png')+'
-    jsonStr := jsonStr+'{"SortNumber":'+IntToStr(j+1)+'';
-    jsonStr := jsonStr+',"UserName":"'+nameArr.GetItem(j)+'"';
-    if j = nameArr.Count-1 then
+    dataStringList.Clear;
+    jsonStr := '';
+    jsonStr := '[';
+    for j:= 0 to nameArr.Count-1 do
     begin
-      jsonStr := jsonStr+',"UserScore":'+IntToStr(scoreArr.GetItem(j))+'}';
-    end else
-    begin
-      jsonStr := jsonStr+',"UserScore":'+IntToStr(scoreArr.GetItem(j))+'},';
+      dataStringList.Add(nameArr.GetItem(j)+' = '+IntToStr(scoreArr.GetItem(j))); //'+QuotedStr('https://clomosy.com/demos/explain_iron.png')+'
+      jsonStr := jsonStr+'{"SortNumber":'+IntToStr(j+1)+'';
+      jsonStr := jsonStr+',"UserName":"'+nameArr.GetItem(j)+'"';
+      if j = nameArr.Count-1 then
+        jsonStr := jsonStr+',"UserScore":'+IntToStr(scoreArr.GetItem(j))+'}';
+      else
+        jsonStr := jsonStr+',"UserScore":'+IntToStr(scoreArr.GetItem(j))+'},';
     end;
-    
-      
-  end;
-  jsonStr := jsonStr+ ']';
-  refreshScoreTable;
-end; 
-
+      jsonStr := jsonStr+ ']';
+      refreshScoreTable;
+  end; 
 procedure DeleteMemberList;
 begin
-  ShowMessage('1');
+  //ShowMessage('1');
   jsonStr := '[]';
-  ShowMessage('2');
+  //ShowMessage('2');
   refreshScoreTable;
-  ShowMessage('3');
+  //ShowMessage('3');
 end;
-
 procedure WinMQTTPublishReceived;
-begin
-  if Not WinMQTT.Connected then     //MQTT BAĞLANTISI YOKSA TEKRAR BAĞLANAN PROSEDÜR
   begin
-    WinMQTT.Connect;
+    if Not WinMQTT.Connected then         //MQTT BAĞLANTISI YOKSA TEKRAR BAĞLANAN PROSEDÜR
+      WinMQTT.Connect;
+    
+    
+    if WinMQTT.ReceivedAlright then
+    begin
+      if pos('=',WinMQTT.ReceivedMessage) > 0 then
+        begin
+          TempResult := WinMQTT.ReceivedMessage;
+          WinMQTT.Send('winOk');
+          dataStringList.Add(clGetStringReplace(TempResult,' ',''));
+          kazananClick;
+        end;
+      if WinMQTT.ReceivedMessage = 'okey' then
+          sendTimer.Enabled := False ;
+    end;
   end;
-  
-  If WinMQTT.ReceivedAlright then
-  begin
-    dataStringList.Add(WinMQTT.ReceivedMessage);
-    kazananClick;
-      //scoreMemo.Lines.Add(SendMQTT.ReceivedMessage);
-  end;
-end;
 procedure MobileMQTTPublishReceived;
 begin
   if Not MobileMQTT.Connected then
-  begin
-    MobileMQTT.Connect;
-  end;
-  If MobileMQTT.ReceivedAlright then
-  begin
-    if MobileMQTT.ReceivedMessage = Clomosy.AppUserGUID then
-    begin
-      ShowMessage('Çeklişte sen çıktın');
-      myDeviceManager.Vibrate(500);
-      baslaBtn.Visible := True;
-    end;
-    else
-    begin
-      anlatbakalimImg.Visible := True;
-      baslaBtn.Visible := False;
-      wordLbl.Visible := False;
-    end;
-  end;
+      MobileMQTT.Connect;
+    
+  if MobileMQTT.ReceivedMessage = 'Basladim' then
+    baslaBtn.Visible := False;
   
+  if MobileMQTT.ReceivedAlright then
+    begin
+      if (Not (pos('=',MobileMQTT.ReceivedMessage) > 0)) and (Length(MobileMQTT.ReceivedMessage) > 9) then   // MESAJ TÜRÜ GUID
+        begin
+        TempGUID := MobileMQTT.ReceivedMessage;
+          if (MobileMQTT.ReceivedMessage = Clomosy.AppUserGUID) or (Clomosy.AppUserProfile = 1) then
+            begin
+              ShowMessage('Çeklişte sen çıktın');
+              myDeviceManager.Vibrate(500);
+              baslaBtn.Visible := True;
+              dogruLbl.Visible:=False;
+              pasLbl.Visible:=False;
+              puanLbl.Visible:=False;
+              bitirBtn.Visible:=False;
+              anlatbakalimImg.Visible := True;
+              MobileMQTT.Send('okey');
+            end;
+          if not( (TempGUID = Clomosy.AppUserGUID) or (Clomosy.AppUserProfile = 1) ) then
+            begin
+              anlatbakalimImg.Visible := True;
+              baslaBtn.Visible := False;
+              wordLbl.Visible := False;
+              dogruLbl.Visible:=False;
+              pasLbl.Visible:=False;
+              puanLbl.Visible:=False;
+              bitirBtn.Visible:=False;
+            end;
+        end;
+      if MobileMQTT.ReceivedMessage = 'winOk' then // MESAJ TÜRÜ ONAY
+          resultTimer.Enabled := False;
+    end;
 end;
 procedure createWord;                                              //KELİME ÜRETEN PROSEDÜR
 begin
@@ -230,8 +294,9 @@ begin
       wordLbl.Caption:=MyWord;
   end;
 end;
-procedure TrueBeforeSleep;                              //SLEEP ÖNCESİ DOĞRU İSE YAPILACAK İŞLEMLER PROSEDÜR
+procedure TrueBeforeSleep; //SLEEP ÖNCESİ DOĞRU İSE YAPILACAK İŞLEMLER PROSEDÜR
 begin 
+  MobileForm.PlayGameSound(CorrectSound);
   myDeviceManager.Vibrate(50);
   jiroskopTimer.Enabled:=False;
   gameTimer.Enabled:=False;
@@ -240,11 +305,12 @@ begin
   dogruImg.Visible := true;
   MobileForm.SetFormColor('#008d36','',clGNone);
   Inc(dogru);
-  konum.Position.X := AlCenter;
-  konum.Position.X := MobileForm.clWidth/2;
+  konum.Position.Y := AlCenter;
+  konum.Position.Y := MobileForm.clHeight/2;
 end;
 procedure FalseBeforeSleep;                            //SLEEP ÖNCESİ DOĞRU İSE YAPILACAK İŞLEMLER PROSEDÜR
 begin 
+  MobileForm.PlayGameSound(WrongSound);
   myDeviceManager.Vibrate(50);
   jiroskopTimer.Enabled:=False;
   gameTimer.Enabled:=False;
@@ -253,8 +319,8 @@ begin
   pasImg.Visible := True;
   MobileForm.SetFormColor('#e20613','',clGNone);
   Inc(pas);
-  konum.Position.X := AlCenter;
-  konum.Position.X := MobileForm.clWidth/2;
+  konum.Position.Y := AlCenter;
+  konum.Position.Y := MobileForm.clHeight/2;
 end;
 procedure TrueOrFalseAfter;                                  //DOĞRU VEYA PAS YAPILDIKTAN SONRA YAPILACAK OLAN İŞLEMLER
 begin
@@ -265,12 +331,13 @@ begin
 end;
 procedure beforeSleep;
 begin
+  MobileMQTT.Send('Basladim');
   anlatbakalimImg.Visible:=False;
   baslaBtn.Visible := False;
   clComponent.SetupComponent(wordLbl,'{"TextSize":45}');
   wordLbl.Caption:='Oyun Başlıyor...';
   wordLbl.Visible := True;
-  gameDuration:=15;                             //OYUN SÜRESİ
+  gameDuration:=60;                             //OYUN SÜRESİ
   SoundisTrue:=True;
 end;
 procedure procSleep;                               //OYUN BAŞLARKEN BEKLEMEK İÇİN
@@ -284,8 +351,41 @@ begin
   puanLbl.Visible:=False;
   bitirBtn.Visible:=False;
   anlatbakalimImg.Visible:=True;
-  
 end;
+procedure MemberNameFind;
+begin
+  try
+    QMembers := TCLJSONQuery.Create(nil);
+    QMembers := Clomosy.DBCloudQueryWith(ftMembers,'','ISNULL(PMembers.Rec_Deleted,0)=0');
+    with QMembers do
+     begin
+         First;
+         while not EOF do
+         begin
+            if FieldByName('Member_GUID').AsString = TempGUID then
+                memberNameFound := FieldByName('Member_Name').AsString
+      
+           Next;
+         end;
+     end;
+  except
+    ShowMessage('Exception Class: '+LastExceptionClassName+' Exception Message: '+LastExceptionMessage);
+  end;
+end;
+procedure ResultTimerON;
+  begin
+    if resultTimerSend <= 10 then
+      begin
+        MobileMQTT.Send( memberNameFound +' = '+IntToStr(puan));
+        Inc(resultTimerSend);
+      end;
+    
+    if resultTimerSend > 10 then
+      begin
+        resultTimer.Enabled := False;
+        ShowMessage('Süre Aşıldı');
+      end;
+  end;
 procedure sonuclar;
 begin
   puan:=((dogru*2)-(pas));
@@ -296,8 +396,14 @@ begin
   dogruLbl.Visible:=True;
   pasLbl.Visible:=True;
   puanLbl.Visible:=True;
-  MobileMQTT.Send(Clomosy.AppUserDisplayName+' = '+IntToStr(puan));
+  
+  MemberNameFind; // Windwows dan gelen GUID bilgisine göre üye ismini bulur.
+  
+  resultTimer.Enabled := True;  // ResultTimerON fonksiyonu çalışır.
+  
+  MobileMQTT.Send( memberNameFound +' = '+IntToStr(puan));
 end;
+
 procedure timerShow;                                  // OYUN SÜRESİNİN EKRANA YAZILDIĞI PROSEDÜR
 begin
    gameTimer.Enabled := False;
@@ -324,57 +430,22 @@ begin
    end;
 end;
 procedure procJiroskop;                                  //JİROSKOP PROSEDÜRÜ
-const
+const 
   harekethizi = 20;
 begin
   if Clomosy.PlatformIsMobile = true then
   begin
-    if MobileForm.clWidth < MobileForm.clHeight then//EKRAN DİKEY İSE
-    begin
-      Case DeviceMotionSensor.GetDirectionX of
-      1:
-      begin
-        konum.Position.X := konum.Position.X - harekethizi;
-      end;
-      2:
-      begin
-        konum.Position.X := konum.Position.X + harekethizi;
-      end;
+    Case DeviceMotionSensor.GetDirectionY of 
+    1:konum.Position.Y := konum.Position.Y - harekethizi;
+    2:konum.Position.Y := konum.Position.Y + harekethizi;
     end;
-      if konum.Position.X <= 0 then // ekran sol kenar taşma
-      begin
-        Clomosy.SleepAndCall(2000,'TrueBeforeSleep','TrueOrFalseAfter');
-      end;
-      else if konum.Position.X >= MobileForm.clWidth then // ekran sağ kenar taşma
-      begin
-        Clomosy.SleepAndCall(2000,'FalseBeforeSleep','TrueOrFalseAfter');
-      end;
-    end; // dikeyse if
-    else //ekran yatay ise
-    begin
-      Case DeviceMotionSensor.GetDirectionY of 
-      1:
-      begin
-        konum.Position.X := konum.Position.X - harekethizi;
-      end;
-      2:
-      begin
-        konum.Position.X := konum.Position.X + harekethizi;
-      end;
-      end;
-      if konum.Position.X <= 0 then // ekran sol kenar taşma
-      begin
-        Clomosy.SleepAndCall(1000,'TrueBeforeSleep','TrueOrFalseAfter');
-      end;
-      if konum.Position.X >= MobileForm.clWidth then // ekran sağ kenar taşma
-      begin
-        Clomosy.SleepAndCall(1000,'FalseBeforeSleep','TrueOrFalseAfter');
-      end;
-    end;
-    //ilk if
+    if konum.Position.Y <= 0 then  // ekran sol kenar taşma
+      Clomosy.SleepAndCall(1000,'TrueBeforeSleep','TrueOrFalseAfter');
+    
+    if konum.Position.Y >= MobileForm.clHeight then // ekran sağ kenar taşma
+      Clomosy.SleepAndCall(1000,'FalseBeforeSleep','TrueOrFalseAfter');
   end;
 end;
-
 procedure createDesignerPnlScreen
 begin
   //SIRALAMA NUMARASI
@@ -399,7 +470,6 @@ begin
   
   //AddDataToProListView;
 end;
-
 procedure scoreTablePnlScreen
 begin
   LblScoreTitleName := WinForm.AddNewProLabel(PnlScoreTbl,'LblScoreTitleName','SKOR TABLOSU');
@@ -417,17 +487,14 @@ begin
   ScoreTblDesignerPanel := WinForm.AddNewProListViewDesignerPanel(ScoreTblListview,'ScoreTblDesignerPanel'); 
   clComponent.SetupComponent(ScoreTblDesignerPanel,'{"Align":"Top","Height":100,"BackgroundColor":"#ffffff","BorderColor":"null","BorderWidth":2,"RoundHeight":20,"RoundWidth":20}');
   ScoreTblListview.SetDesignerPanel(ScoreTblDesignerPanel);
-  
   //DESİGNERPANEL İÇİNDEKİLER
   createDesignerPnlScreen;
 end;
-
 begin //MAIN
   SoundisTrue:=True;
   dogru:=0;
   pas:=0;
 
-  
   if not Clomosy.PlatformIsMobile then//WİN İSE
   begin
     WinForm:=TclForm.Create(self);
@@ -440,6 +507,7 @@ begin //MAIN
     nameArr := TClArrayString.Create;
     scoreArr := TClArrayInteger.Create;
       WinMQTT := WinForm.AddNewMQTTConnection(WinForm,'WinMQTT');
+      WinForm.AddNewEvent(WinMQTT,tbeOnMQTTStatusChanged,'WinMQTTStatusChanged');
       WinForm.AddNewEvent(WinMQTT,tbeOnMQTTPublishReceived,'WinMQTTPublishReceived');
       WinMQTT.Channel := 'cekilis'; //project guid + channel
       WinMQTT.Connect;
@@ -449,6 +517,9 @@ begin //MAIN
     cekilisTimer.Enabled := False;
     WinForm.AddNewEvent(cekilisTimer,tbeOnTimer,'ProcCekilis');
     
+    sendTimer:= WinForm.AddNewTimer(WinForm,'sendTimer',1000);
+    sendTimer.Enabled := False;
+    WinForm.AddNewEvent(sendTimer,tbeOnTimer,'SendOnTimer');
     
     LblMainTitle := WinForm.AddNewProImage(WinForm,'LblMainTitle');
     clComponent.SetupComponent(LblMainTitle,'{"Align" : "MostTop","MarginTop":10,"Height":80,
@@ -483,9 +554,7 @@ begin //MAIN
     //clComponent.SetupComponent(BtnSifirla,'{"Align" : "Top","MarginTop":20,"MarginLeft":20,"MarginRight":20,"Height":50,"RoundHeight":10, "RoundWidth":10,"BorderColor":"#fbb03b","BorderWidth":3,"BackgroundColor":"#ffffff","TextColor":"#000000","TextSize":20,"TextBold":"yes"}');
     //WinForm.AddNewEvent(BtnSifirla,tbeOnClick,'DeleteMemberList');
     
-    
-  
-    WinForm.Run;
+    WinForm.RunModal;
   end;
   else                                            //MOBİLE İSE
   begin
@@ -494,68 +563,107 @@ begin //MAIN
     MobileForm:=TclGameform.Create(self);
     MobileForm.SetFormBGImage('https://clomosy.com/demos/explain_bg.png');
     
-    MobileForm.LytTopBar.Visible:=True;
+    Clomosy.HoldScreen := True;
+    
+    MobileForm.LytTopBar.Visible:=False;
     //TclProButton(MobileForm.clFindComponent('BtnGoBack')).Visible:=True;
     
     MobileMQTT := MobileForm.AddNewMQTTConnection(MobileForm,'MobileMQTT');
+    MobileForm.AddNewEvent(MobileMQTT,tbeOnMQTTStatusChanged,'MobileMQTTStatusChanged');
     MobileForm.AddNewEvent(MobileMQTT,tbeOnMQTTPublishReceived,'MobileMQTTPublishReceived');
     MobileMQTT.Channel := 'cekilis';//project guid + channel
     MobileMQTT.Connect;
     
-    baslaBtn := MobileForm.AddNewProButton(MobileForm,'baslaBtn','Başla');
-    clComponent.SetupComponent(baslaBtn,'{"TextColor":"#ffffff","Height":100,"Width":50,"TextSize":25,"Align" : "MostBottom"}');
-    MobileForm.AddNewEvent(baslaBtn,tbeOnClick,'procSleep');
-    baslaBtn.Visible:=false;
+       
+    mobilePanel := MobileForm.AddNewProPanel(MobileForm,'mobilePanel');
+    clComponent.SetupComponent(mobilePanel,'{"Align" : "Client"}');
+
+    anlatbakalimImg := MobileForm.AddNewProImage(MobileForm,'anlatbakalimImg');
+    clComponent.SetupComponent(anlatbakalimImg,'{"Align" : "Center","Height":200,"Width":200,"ImgUrl":"https://clomosy.com/demos/explain_title.png", "ImgFit":"yes"}');
     
-    bitirBtn := MobileForm.AddNewProButton(MobileForm,'bitirBtn','Bitir');
-    clComponent.SetupComponent(bitirBtn,'{"TextColor":"#ffffff","Height":100,"Width":50,"TextSize":25,"Align" : "MostBottom"}');
-    MobileForm.AddNewEvent(bitirBtn,tbeOnClick,'bitirBtnClick');
-    bitirBtn.Visible:=false;
+
     
+          
+    puanPanel := MobileForm.AddNewProPanel(mobilePanel,'puanPanel');
+    clComponent.SetupComponent(puanPanel,'{"Align" : "Center"}');
+
     
-    wordLbl := MobileForm.AddNewProLabel(MobileForm,'wordLbl','Anlatılacak Kelime');
-    clComponent.SetupComponent(wordLbl,'{"TextVerticalAlign":"center", "TextHorizontalAlign":"center","Align" : "Center","TextColor": "#ffffff","Height":400,"Width":400,"TextSize":100}');
-    wordLbl.Visible:=False;
-    
-    timerLbl := MobileForm.AddNewProLabel(MobileForm,'timerLbl','');
-    clComponent.SetupComponent(timerLbl,'{"TextVerticalAlign":"center", "TextHorizontalAlign":"center","Align" : "MostBottom","TextColor":"#ffffff","Height":100,"Width":50,"TextSize":25}');
-    timerLbl.Visible := False;
-    
-    dogruLbl := MobileForm.AddNewProLabel(MobileForm,'dogruLbl','');
-    clComponent.SetupComponent(dogruLbl,'{"TextVerticalAlign":"center", "TextHorizontalAlign":"center","MarginTop" : 50,"TextColor":"#ffffff","Height":150,"Width":150,"TextSize":20}');
+    dogruLbl := MobileForm.AddNewProLabel(puanPanel,'dogruLbl','');
+    clComponent.SetupComponent(dogruLbl,'{"Align":"Top","TextColor":"#ffffff","Height":30,"TextSize":20,"MarginTop":5}');
     dogruLbl.Visible := False;
-    
-    pasLbl := MobileForm.AddNewProLabel(MobileForm,'pasLbl','');
-    clComponent.SetupComponent(pasLbl,'{"TextVerticalAlign":"center", "TextHorizontalAlign":"center","MarginTop" : 100,"TextColor":"#ffffff","Height":150,"Width":150,"TextSize":20}');
+      
+    pasLbl := MobileForm.AddNewProLabel(puanPanel,'pasLbl','');
+    clComponent.SetupComponent(pasLbl,'{"Align":"Top","TextColor":"#ffffff","Height":30,"TextSize":20,"MarginTop":5}');
     pasLbl.Visible := False;
-    
-    puanLbl := MobileForm.AddNewProLabel(MobileForm,'puanLbl','');
-    clComponent.SetupComponent(puanLbl,'{"TextVerticalAlign":"center", "TextHorizontalAlign":"center","MarginTop" : 150,"TextColor":"#ffffff","Height":150,"Width":150,"TextSize":25}');
+      
+    puanLbl := MobileForm.AddNewProLabel(puanPanel,'puanLbl','');
+    clComponent.SetupComponent(puanLbl,'{"Align":"Top","TextColor":"#ffffff","Height":30,"TextSize":25,"MarginTop":5}');
     puanLbl.Visible := False;
+
+    wordPanel := MobileForm.AddNewProPanel(mobilePanel,'wordPanel');
+    clComponent.SetupComponent(wordPanel,'{"Align" : "Client"}');
+  
+
+    wordLbl := MobileForm.AddNewProLabel(wordPanel,'wordLbl','Anlatılacak Kelime');
+    clComponent.SetupComponent(wordLbl,'{"Align":"Center", "TextVerticalAlign":"center", "TextHorizontalAlign":"center","TextColor": "#ffffff","TextSize":100,"Width":1000,"Height":500}');
+    wordLbl.Visible:=False;
+    wordLbl.RotationAngle := 90;
     
+    timerLbl := MobileForm.AddNewProLabel(wordPanel,'timerLbl','');
+    clComponent.SetupComponent(timerLbl,'{"TextVerticalAlign":"Center", "TextHorizontalAlign":"center","Align" : "Left","TextColor":"#ffffff","Height":100,"Width":100,"TextSize":25}');
+    timerLbl.Visible := False;
+    timerLbl.RotationAngle := 90;
     
     MobileForm.AddGameAssetFromUrl('https://www.clomosy.com/game/assets/Win.wav');
     Sound := MobileForm.RegisterSound('Win.wav');
     MobileForm.PlayGameSound(Sound);
+    
+    baslaLayout := MobileForm.AddNewLayout(mobilePanel,'baslaLayout');
+    baslaLayout.Width := 100;
+    baslaLayout.Height := 100;
+    baslaLayout.Align := alNone;
+    baslaLayout.Position.Y := (mobilePanel.Height)-(baslaLayout.Height);
+
+    baslaBtn := MobileForm.AddNewProButton(baslaLayout,'baslaBtn','Başla');
+    clComponent.SetupComponent(baslaBtn,'{"TextColor":"#ffffff","Height":100,"Width":50,"TextSize":25,"Align" : "MostBottom"}');
+    MobileForm.AddNewEvent(baslaBtn,tbeOnClick,'procSleep');
+    baslaBtn.Visible:=false;
+    
+    bitirBtn := MobileForm.AddNewProButton(baslaLayout,'bitirBtn','Bitir');
+    clComponent.SetupComponent(bitirBtn,'{"TextColor":"#ffffff","Height":100,"Width":50,"TextSize":25,"Align" : "MostBottom"}');
+    MobileForm.AddNewEvent(bitirBtn,tbeOnClick,'bitirBtnClick');
+    bitirBtn.Visible:=false;
+    
+    MobileForm.AddGameAssetFromUrl('https://clomosy.com/demos/correct.wav');
+    CorrectSound := MobileForm.RegisterSound('correct.wav');
+    MobileForm.PlayGameSound(CorrectSound);
+    
+    MobileForm.AddGameAssetFromUrl('https://clomosy.com/demos/wrong.wav');
+    WrongSound := MobileForm.RegisterSound('wrong.wav');
+    MobileForm.PlayGameSound(WrongSound);
+    
     MobileForm.SoundIsActive:=True;
     
-    DeviceMotionSensor := MobileForm.AddNewSensorsMotion(MobileForm,'DeviceMotionSensor');
+    DeviceMotionSensor := MobileForm.AddNewSensorsMotion(mobilePanel,'DeviceMotionSensor');
     DeviceMotionSensor.Active := True;
     
-    gameTimer:= MobileForm.AddNewTimer(MobileForm,'gameTimer',1000);//ilk oyunda timer ı newliyoruz
+    gameTimer:= MobileForm.AddNewTimer(mobilePanel,'gameTimer',1000);//ilk oyunda timer ı newliyoruz
     gameTimer.Enabled := False;
     MobileForm.AddNewEvent(gameTimer,tbeOnTimer,'timerShow');
     
-    jiroskopTimer := MobileForm.AddNewTimer(MobileForm,'jiroskopTimer',300);
+    jiroskopTimer := MobileForm.AddNewTimer(mobilePanel,'jiroskopTimer',300);
     jiroskopTimer.Interval := 40;
     MobileForm.AddNewEvent(jiroskopTimer,tbeOnTimer,'procJiroskop');
     
-    konum := MobileForm.AddNewProImage(MobileForm,'konum');
+    resultTimer:= MobileForm.AddNewTimer(mobilePanel,'resultTimer',1000);
+    resultTimer.Enabled := False;
+    MobileForm.AddNewEvent(resultTimer,tbeOnTimer,'ResultTimerON')
+    
+    konum := MobileForm.AddNewProImage(mobilePanel,'konum');
     konum.clSetImage('https://clomosy.com/educa/ufo.png');
     konum.Width := 1;
-    //konum.Align := AlCenter;
-    
-    testLabelMin_X := konum.Position.X;
+
+    testLabelMin_X := konum.Position.Y;
     testLabelMax_X := testLabelMin_X + konum.Width;
     
     konum.Align := alNone;
@@ -563,13 +671,12 @@ begin //MAIN
     dogruImg := MobileForm.AddNewProImage(MobileForm,'dogruImg');
     clComponent.SetupComponent(dogruImg,'{"Align" : "Center","Height":200,"Width":200,"ImgUrl":"https://clomosy.com/demos/ThumbsUp.png", "ImgFit":"yes"}');
     dogruImg.Visible := false;
+    dogruImg.RotationAngle := 90;
   
     pasImg := MobileForm.AddNewProImage(MobileForm,'pasImg');
     clComponent.SetupComponent(pasImg,'{"Align" : "Center","Height":200,"Width":200,"ImgUrl":"https://clomosy.com/demos/ThumbsDown.png", "ImgFit":"yes"}');
     pasImg.Visible := false;
-    
-    anlatbakalimImg := MobileForm.AddNewProImage(MobileForm,'anlatbakalimImg');
-    clComponent.SetupComponent(anlatbakalimImg,'{"Align" : "Center","Height":200,"Width":200,"ImgUrl":"https://clomosy.com/demos/explain_title.png", "ImgFit":"yes"}');
+    pasImg.RotationAngle := 90;
     
     MobileForm.Run;
   end;
